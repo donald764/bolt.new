@@ -1,0 +1,392 @@
+// VibeNation Full Starter App (React + Firebase + Realtime Chat)
+// Paste this into Replit AI and it will split into files for you
+
+// ========================== firebase.js ==========================
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+export const provider = new GoogleAuthProvider();
+export const db = getFirestore(app);
+
+// ========================== main.jsx ==========================
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import App from './App.jsx';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>
+);
+
+// ========================== App.jsx ==========================
+import React from 'react';
+import { useRoutes } from 'react-router-dom';
+import { routes } from './routes.jsx';
+import AuthGate from './components/AuthGate.jsx';
+import Nav from './components/Nav.jsx';
+
+export default function App() {
+  const element = useRoutes(routes);
+  return (
+    <AuthGate>
+      <Nav />
+      <div style={{ maxWidth: 720, margin: '0 auto', padding: 16 }}>{element}</div>
+    </AuthGate>
+  );
+}
+
+// ========================== routes.jsx ==========================
+import Feed from './components/Feed.jsx';
+import Profile from './components/Profile.jsx';
+import Chat from './components/Chat.jsx';
+
+export const routes = [
+  { path: '/', element: <Feed /> },
+  { path: '/profile/:uid', element: <Profile /> },
+  { path: '/chat/:chatId', element: <Chat /> },
+];
+
+// ========================== components/AuthGate.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { auth, db, provider } from '../firebase.js';
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+} from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+
+export default function AuthGate({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      setLoading(false);
+      if (u) {
+        const ref = doc(db, 'users', u.uid);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          await setDoc(ref, {
+            uid: u.uid,
+            displayName: u.displayName || 'New User',
+            photoURL: u.photoURL || '',
+            bio: '',
+            createdAt: Date.now(),
+          });
+        }
+      }
+    });
+  }, []);
+
+  if (loading) return <p>Loading...</p>;
+  if (!user)
+    return (
+      <div style={{ maxWidth: 420, margin: '40px auto', textAlign: 'center' }}>
+        <h2>VibeNation – Sign in</h2>
+        <button onClick={() => signInWithPopup(auth, provider)}>Continue with Google</button>
+      </div>
+    );
+
+  return <>{children}</>;
+}
+
+// ========================== components/Nav.jsx ==========================
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase.js';
+
+export default function Nav() {
+  return (
+    <nav style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div>
+        <Link to="/">Feed</Link> | <Link to="/profile/me">Profile</Link>
+      </div>
+      <button onClick={() => signOut(auth)}>Sign Out</button>
+    </nav>
+  );
+}
+
+// ========================== components/Feed.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import PostCard from './PostCard.jsx';
+import NewPost from './NewPost.jsx';
+import ZonesFilter from './ZonesFilter.jsx';
+
+export default function Feed() {
+  const [posts, setPosts] = useState([]);
+  const [zoneFilter, setZoneFilter] = useState('All');
+
+  useEffect(() => {
+    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      if (zoneFilter !== 'All') data = data.filter((p) => p.zone === zoneFilter);
+      setPosts(data);
+    });
+    return () => unsubscribe();
+  }, [zoneFilter]);
+
+  return (
+    <div>
+      <h2>Feed</h2>
+      <ZonesFilter zone={zoneFilter} setZone={setZoneFilter} />
+      <NewPost />
+      {posts.map((post) => (
+        <PostCard key={post.id} post={post} />
+      ))}
+    </div>
+  );
+}
+
+// ========================== components/ZonesFilter.jsx ==========================
+import React from 'react';
+
+const zones = [
+  'All', 'CleanZone','DanceZone','MusicZone','TrendZone','ArtZone','FoodZone',
+  'FitZone','StyleZone','ComedyZone','KnowledgeZone','SkillZone','FreeZone'
+];
+
+export default function ZonesFilter({ zone, setZone }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {zones.map((z) => (
+        <button
+          key={z}
+          onClick={() => setZone(z)}
+          style={{ marginRight: 8, background: z === zone ? '#555' : '#ddd', color: z===zone?'#fff':'#000' }}
+        >
+          {z}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ========================== components/NewPost.jsx ==========================
+import React, { useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+
+export default function NewPost() {
+  const [text, setText] = useState('');
+  const [zone, setZone] = useState('DanceZone');
+
+  const submitPost = async () => {
+    if (!text) return;
+    await addDoc(collection(db, 'posts'), {
+      text,
+      zone,
+      authorId: auth.currentUser.uid,
+      authorName: auth.currentUser.displayName,
+      createdAt: serverTimestamp(),
+    });
+    setText('');
+  };
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What's your talent?" rows={3} style={{ width: '100%' }} />
+      <select value={zone} onChange={(e) => setZone(e.target.value)}>
+        <option>CleanZone</option><option>DanceZone</option><option>MusicZone</option>
+        <option>TrendZone</option><option>ArtZone</option><option>FoodZone</option>
+        <option>FitZone</option><option>StyleZone</option><option>ComedyZone</option>
+        <option>KnowledgeZone</option><option>SkillZone</option><option>FreeZone</option>
+      </select>
+      <button onClick={submitPost}>Post</button>
+    </div>
+  );
+}
+
+// ========================== components/PostCard.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { doc, collection, setDoc, deleteDoc, getDoc, addDoc, query, onSnapshot } from 'firebase/firestore';
+import LikeButton from './LikeButton.jsx';
+import VoteButton from './VoteButton.jsx';
+
+export default function PostCard({ post }) {
+  return (
+    <div style={{ border: '1px solid #ccc', padding: 12, marginBottom: 12 }}>
+      <strong>{post.authorName}</strong> in <em>{post.zone}</em>
+      <p>{post.text}</p>
+      <LikeButton postId={post.id} />
+      <VoteButton postId={post.id} />
+    </div>
+  );
+}
+
+// ========================== components/LikeButton.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+
+export default function LikeButton({ postId }) {
+  const [liked, setLiked] = useState(false);
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const ref = doc(db, `posts/${postId}/likes/${auth.currentUser.uid}`);
+    const unsubscribe = onSnapshot(ref, (snap) => setLiked(snap.exists()));
+    const q = collection(db, `posts/${postId}/likes`);
+    const unsubscribeCount = onSnapshot(q, (snap) => setCount(snap.size));
+    return () => { unsubscribe(); unsubscribeCount(); };
+  }, [postId]);
+
+  const toggleLike = async () => {
+    const ref = doc(db, `posts/${postId}/likes/${auth.currentUser.uid}`);
+    if (liked) await deleteDoc(ref);
+    else await setDoc(ref, { userId: auth.currentUser.uid });
+  };
+
+  return <button onClick={toggleLike}>{liked ? '❤️' : '🤍'} {count}</button>;
+}
+
+// ========================== components/VoteButton.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+
+export default function VoteButton({ postId }) {
+  const [voted, setVoted] = useState(false);
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const ref = doc(db, `posts/${postId}/votes/${auth.currentUser.uid}`);
+    const unsubscribe = onSnapshot(ref, (snap) => setVoted(snap.exists()));
+    const q = collection(db, `posts/${postId}/votes`);
+    const unsubscribeCount = onSnapshot(q, (snap) => setCount(snap.size));
+    return () => { unsubscribe(); unsubscribeCount(); };
+  }, [postId]);
+
+  const doVote = async () => {
+    if (voted) return alert('You already voted');
+    const ref = doc(db, `posts/${postId}/votes/${auth.currentUser.uid}`);
+    await setDoc(ref, { userId: auth.currentUser.uid });
+  };
+
+  return <button onClick={doVote}>{voted ? 'Voted' : 'Vote'} {count}</button>;
+}
+
+// ========================== components/Profile.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { doc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
+import FollowButton from './FollowButton.jsx';
+import { useParams } from 'react-router-dom';
+import PostCard from './PostCard.jsx';
+
+export default function Profile() {
+  const { uid } = useParams();
+  const [userData, setUserData] = useState(null);
+  const [posts, setPosts] = useState([]);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const ref = doc(db, 'users', uid === 'me' ? auth.currentUser.uid : uid);
+      const snap = await getDoc(ref);
+      if (snap.exists()) setUserData(snap.data());
+    };
+    fetchUser();
+  }, [uid]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'posts'), where('authorId', '==', uid === 'me' ? auth.currentUser.uid : uid));
+    const unsubscribe = onSnapshot(q, (snap) => setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+    return () => unsubscribe();
+  }, [uid]);
+
+  if (!userData) return <p>Loading profile...</p>;
+  return (
+    <div>
+      <h2>{userData.displayName}</h2>
+      <FollowButton targetUid={uid} />
+      <h3>Posts</h3>
+      {posts.map((p) => <PostCard key={p.id} post={p} />)}
+    </div>
+  );
+}
+
+// ========================== components/FollowButton.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+
+export default function FollowButton({ targetUid }) {
+  const [following, setFollowing] = useState(false);
+  const uid = auth.currentUser.uid;
+
+  useEffect(() => {
+    const ref = doc(db, `users/${uid}/following/${targetUid}`);
+    const unsubscribe = onSnapshot(ref, (snap) => setFollowing(snap.exists()));
+    return () => unsubscribe();
+  }, [targetUid]);
+
+  const toggleFollow = async () => {
+    const ref = doc(db, `users/${uid}/following/${targetUid}`);
+    if (following) await deleteDoc(ref);
+    else await setDoc(ref, { followedAt: Date.now() });
+  };
+
+  if (uid === targetUid) return null;
+  return <button onClick={toggleFollow}>{following ? 'Unfollow' : 'Follow'}</button>;
+}
+
+// ========================== components/Chat.jsx ==========================
+import React, { useEffect, useState } from 'react';
+import { db, auth } from '../firebase.js';
+import { collection, doc, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { useParams } from 'react-router-dom';
+
+export default function Chat() {
+  const { chatId } = useParams();
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState('');
+
+  useEffect(() => {
+    const q = query(collection(db, `chats/${chatId}/messages`), orderBy('createdAt'));
+    const unsubscribe = onSnapshot(q, (snap) => setMessages(snap.docs.map(d=>({id:d.id,...d.data()}))));
+    return () => unsubscribe();
+  }, [chatId]);
+
+  const sendMessage = async () => {
+    if (!text) return;
+    await addDoc(collection(db, `chats/${chatId}/messages`), {
+      text,
+      senderId: auth.currentUser.uid,
+      createdAt: Date.now(),
+    });
+    setText('');
+  };
+
+  return (
+    <div>
+      <h2>Chat</h2>
+      <div style={{border:'1px solid #ccc', padding:8, maxHeight:400, overflowY:'scroll'}}>
+        {messages.map((m) => <p key={m.id}><strong>{m.senderId===auth.currentUser.uid?'You':m.senderId}:</strong> {m.text}</p>)}
+      </div>
+      <input value={text} onChange={e=>setText(e.target.value)} placeholder="Type..." />
+      <button onClick={sendMessage}>Send</button>
+    </div>
+  );
+}
